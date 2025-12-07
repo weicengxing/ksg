@@ -181,15 +181,15 @@
                   </div>
                 </div>
 
-                <!-- 登录设备 -->
-                <div class="security-item hover-effect" @click="handleViewDevices">
+                <!-- 二维码登录 -->
+                <div class="security-item hover-effect" @click="handleShowQRLogin">
                   <div class="item-left">
                     <div class="item-icon-bg blue">
                       <el-icon><Monitor /></el-icon>
                     </div>
                     <div class="item-content">
-                      <h3>登录设备管理</h3>
-                      <p>查看并管理当前登录的设备列表，下线异常设备</p>
+                      <h3>二维码登录</h3>
+                      <p>使用手机扫描二维码，快速登录其他设备</p>
                     </div>
                   </div>
                   <div class="item-action">
@@ -301,6 +301,59 @@
         <button class="btn-primary" @click="showLoginHistoryDialog = false">关闭</button>
       </template>
     </el-dialog>
+
+    <!-- 二维码登录弹窗 -->
+    <el-dialog
+      v-model="showQRLoginDialog"
+      title="二维码登录"
+      width="400px"
+      :close-on-click-modal="false"
+      @close="handleQRDialogClose"
+    >
+      <div class="qr-dialog-content">
+        <p class="qr-tip">使用手机扫描下方二维码，在手机上确认登录</p>
+
+        <div class="qr-container">
+          <div v-if="qrLoading" class="qr-loading">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            <span>生成中...</span>
+          </div>
+          <div v-else-if="qrExpired" class="qr-expired" @click="generateQRCode">
+            <el-icon><Warning /></el-icon>
+            <span>二维码已过期</span>
+            <p>点击刷新</p>
+          </div>
+          <div v-else-if="qrConfirmed" class="qr-confirmed">
+            <el-icon><CircleCheckFilled /></el-icon>
+            <span>登录成功</span>
+          </div>
+          <div v-else class="qr-code-wrapper">
+            <img :src="qrCodeImage" alt="登录二维码" class="qr-code-img" />
+          </div>
+        </div>
+
+        <div class="qr-status">
+          <span v-if="qrLoading">正在生成二维码...</span>
+          <span v-else-if="qrExpired">二维码已过期，请点击刷新</span>
+          <span v-else-if="qrConfirmed">扫码成功，正在跳转...</span>
+          <span v-else>
+            <el-icon class="scanning-icon"><Iphone /></el-icon>
+            请使用手机扫描二维码
+          </span>
+        </div>
+
+        <div v-if="!qrLoading && !qrExpired && !qrConfirmed" class="qr-countdown">
+          二维码有效期：{{ qrCountdown }}秒
+        </div>
+      </div>
+
+      <template #footer>
+        <button class="btn-ghost" @click="handleQRDialogClose">关闭</button>
+        <button v-if="qrExpired" class="btn-primary" @click="generateQRCode">
+          刷新二维码
+        </button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -344,6 +397,17 @@ const securityRating = ref({ level: 'medium', label: '中', color: 'yellow' })
 const showLoginHistoryDialog = ref(false)
 const loginHistoryLoading = ref(false)
 const loginHistory = ref([])
+
+// 二维码登录相关状态
+const showQRLoginDialog = ref(false)
+const qrLoading = ref(false)
+const qrExpired = ref(false)
+const qrConfirmed = ref(false)
+const qrCodeImage = ref('')
+const qrId = ref('')
+const qrCountdown = ref(300)
+let qrPollingTimer = null
+let qrCountdownTimer = null
 
 // 计算安全评级样式类
 const securityRatingClass = computed(() => {
@@ -534,6 +598,102 @@ const handleViewDevices = async () => {
     const res = await request.get('/auth/login-devices')
     ElMessageBox.alert(`当前活跃设备数: ${res.data.devices?.length || 0}`, '设备管理', { confirmButtonText: '确定' })
   } catch (e) { ElMessage.info('功能演示：此处将展示设备列表') }
+}
+
+// ==================== 二维码登录相关方法 ====================
+
+const handleShowQRLogin = () => {
+  showQRLoginDialog.value = true
+  generateQRCode()
+}
+
+const generateQRCode = async () => {
+  qrLoading.value = true
+  qrExpired.value = false
+  qrConfirmed.value = false
+  qrCodeImage.value = ''
+
+  // 清除之前的定时器
+  clearQRTimers()
+
+  try {
+    const res = await request.post('/auth/qr/generate')
+    qrId.value = res.data.qr_id
+
+    // 使用在线二维码生成服务生成二维码图片
+    qrCodeImage.value = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(res.data.qr_url)}`
+
+    // 开始倒计时
+    qrCountdown.value = res.data.expires_in || 300
+    startCountdown()
+
+    // 开始轮询检查登录状态
+    startPolling()
+  } catch (e) {
+    ElMessage.error('生成二维码失败，请重试')
+    qrExpired.value = true
+  } finally {
+    qrLoading.value = false
+  }
+}
+
+const startCountdown = () => {
+  qrCountdownTimer = setInterval(() => {
+    qrCountdown.value--
+    if (qrCountdown.value <= 0) {
+      qrExpired.value = true
+      clearQRTimers()
+    }
+  }, 1000)
+}
+
+const startPolling = () => {
+  qrPollingTimer = setInterval(async () => {
+    try {
+      const res = await request.get(`/auth/qr/check/${qrId.value}`)
+
+      if (res.data.status === 'confirmed') {
+        // 登录成功
+        qrConfirmed.value = true
+        clearQRTimers()
+
+        // 保存token并跳转
+        userStore.setLogin(res.data.access_token, res.data.username)
+        ElMessage.success('扫码登录成功！')
+
+        setTimeout(() => {
+          showQRLoginDialog.value = false
+          router.push('/')
+        }, 1500)
+      } else if (res.data.status === 'expired') {
+        qrExpired.value = true
+        clearQRTimers()
+      }
+    } catch (e) {
+      // 轮询出错，忽略
+    }
+  }, 2000) // 每2秒检查一次
+}
+
+const clearQRTimers = () => {
+  if (qrPollingTimer) {
+    clearInterval(qrPollingTimer)
+    qrPollingTimer = null
+  }
+  if (qrCountdownTimer) {
+    clearInterval(qrCountdownTimer)
+    qrCountdownTimer = null
+  }
+}
+
+const handleQRDialogClose = () => {
+  showQRLoginDialog.value = false
+  clearQRTimers()
+  qrLoading.value = false
+  qrExpired.value = false
+  qrConfirmed.value = false
+  qrCodeImage.value = ''
+  qrId.value = ''
 }
 
 const handleViewLoginHistory = async () => {
@@ -1143,5 +1303,119 @@ onMounted(fetchUserInfo)
 .btn-ghost:hover {
   background: #f3f4f6;
   border-color: #d1d5db;
+}
+
+/* ================= 二维码登录弹窗样式 ================= */
+.qr-dialog-content {
+  text-align: center;
+  padding: 10px 0;
+}
+
+.qr-tip {
+  font-size: 14px;
+  color: #6b7280;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+.qr-container {
+  width: 220px;
+  height: 220px;
+  margin: 0 auto 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f9fafb;
+  border-radius: 16px;
+  border: 2px solid #e5e7eb;
+}
+
+.qr-loading,
+.qr-expired,
+.qr-confirmed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #9ca3af;
+}
+
+.qr-loading .el-icon {
+  font-size: 40px;
+  color: #6366f1;
+}
+
+.qr-expired {
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.qr-expired:hover {
+  color: #6366f1;
+}
+
+.qr-expired .el-icon {
+  font-size: 40px;
+  color: #f59e0b;
+}
+
+.qr-expired span {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.qr-expired p {
+  font-size: 12px;
+  margin: 0;
+  color: #6366f1;
+}
+
+.qr-confirmed .el-icon {
+  font-size: 48px;
+  color: #10b981;
+}
+
+.qr-confirmed span {
+  font-size: 16px;
+  font-weight: 600;
+  color: #10b981;
+}
+
+.qr-code-wrapper {
+  padding: 10px;
+  background: white;
+  border-radius: 12px;
+}
+
+.qr-code-img {
+  width: 180px;
+  height: 180px;
+  display: block;
+}
+
+.qr-status {
+  font-size: 14px;
+  color: #4b5563;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.scanning-icon {
+  color: #6366f1;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.qr-countdown {
+  font-size: 13px;
+  color: #9ca3af;
 }
 </style>
