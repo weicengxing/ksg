@@ -164,7 +164,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import axios from 'axios'
+import request from '../utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
@@ -220,7 +220,7 @@ const handleAvatarChange = async (event) => {
   data.append('file', file)
 
   try {
-    const res = await axios.post('http://localhost:8000/auth/upload-avatar', data)
+    const res = await request.post('/auth/upload-avatar', data)
     userInfo.value.avatar = res.data.avatar
     ElMessage.success('头像上传成功')
     // 重新获取完成度
@@ -233,7 +233,7 @@ const handleAvatarChange = async (event) => {
 
 const fetchUserInfo = async () => {
   try {
-    const res = await axios.get('http://localhost:8000/auth/me')
+    const res = await request.get('/auth/me')
     userInfo.value = { ...res.data }
     const fetchedData = {
       username: res.data.username,
@@ -267,7 +267,7 @@ const handleUpdateInfo = async () => {
 
   saving.value = true
   try {
-    const res = await axios.put('http://localhost:8000/auth/update-profile', formData.value)
+    const res = await request.put('/auth/update-profile', formData.value)
     ElMessage.success('保存成功')
 
     // 如果用户名变更，更新store
@@ -294,7 +294,7 @@ const handleDeleteAccount = async () => {
     await ElMessageBox.confirm('确定要注销账户吗？此操作无法撤销。', '警告', {
       type: 'warning', confirmButtonText: '注销', cancelButtonText: '取消'
     })
-    await axios.delete('http://localhost:8000/auth/delete-account')
+    await request.delete('/auth/delete-account')
     userStore.logout()
     router.push('/login')
   } catch (e) { /* Cancelled */ }

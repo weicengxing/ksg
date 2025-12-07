@@ -306,7 +306,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import axios from 'axios'
+import request from '../utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
@@ -378,7 +378,7 @@ const handleAvatarChange = async (event) => {
   localAvatarUrl.value = URL.createObjectURL(file)
   const fd = new FormData(); fd.append('file', file)
   try {
-    const res = await axios.post('http://localhost:8000/auth/upload-avatar', fd)
+    const res = await request.post('/auth/upload-avatar', fd)
     userInfo.value.avatar = res.data.avatar
     ElMessage.success('头像上传成功')
   } catch (e) { ElMessage.error('上传失败') }
@@ -386,7 +386,7 @@ const handleAvatarChange = async (event) => {
 
 const fetchUserInfo = async () => {
   try {
-    const res = await axios.get('http://localhost:8000/auth/me')
+    const res = await request.get('/auth/me')
     userInfo.value = res.data
     // 同步2FA状态
     twoFactorEnabled.value = res.data.twofa_enabled || false
@@ -398,7 +398,7 @@ const fetchUserInfo = async () => {
 // 获取安全评级
 const fetchSecurityRating = async () => {
   try {
-    const res = await axios.get('http://localhost:8000/auth/security-rating')
+    const res = await request.get('/auth/security-rating')
     securityRating.value = res.data.rating
   } catch (e) {
     // 如果获取失败，使用默认值
@@ -423,7 +423,7 @@ const handleTwoFactorChange = async (newValue) => {
         { confirmButtonText: '确定关闭', cancelButtonText: '取消', type: 'warning' }
       )
       twoFactorLoading.value = true
-      await axios.post('http://localhost:8000/auth/disable-2fa')
+      await request.post('/auth/disable-2fa')
       twoFactorEnabled.value = false
       ElMessage.success('两步验证已关闭')
       // 刷新安全评级
@@ -495,7 +495,7 @@ const confirmEnableTwoFactor = async () => {
   try {
     const fd = new FormData()
     fd.append('file', twoFactorFile.value)
-    await axios.post('http://localhost:8000/auth/enable-2fa', fd)
+    await request.post('/auth/enable-2fa', fd)
     twoFactorEnabled.value = true
     showTwoFactorDialog.value = false
     clearTwoFactorFile()
@@ -516,7 +516,7 @@ const handleChangePassword = async () => {
   
   changingPassword.value = true
   try {
-    await axios.put('http://localhost:8000/auth/change-password', {
+    await request.put('/auth/change-password', {
       current_password: passwordForm.value.currentPassword,
       new_password: passwordForm.value.newPassword
     })
@@ -531,7 +531,7 @@ const handleChangePassword = async () => {
 
 const handleViewDevices = async () => {
   try {
-    const res = await axios.get('http://localhost:8000/auth/login-devices')
+    const res = await request.get('/auth/login-devices')
     ElMessageBox.alert(`当前活跃设备数: ${res.data.devices?.length || 0}`, '设备管理', { confirmButtonText: '确定' })
   } catch (e) { ElMessage.info('功能演示：此处将展示设备列表') }
 }
@@ -542,7 +542,7 @@ const handleViewLoginHistory = async () => {
   loginHistory.value = []
 
   try {
-    const res = await axios.get('http://localhost:8000/auth/login-history')
+    const res = await request.get('/auth/login-history')
     loginHistory.value = res.data.records || []
   } catch (e) {
     ElMessage.error('获取登录历史失败')
@@ -627,7 +627,7 @@ const handleDeleteAccount = async () => {
     )
 
     // 用户确认注销，调用后端API删除账户
-    await axios.delete('http://localhost:8000/auth/delete-account')
+    await request.delete('/auth/delete-account')
     // 注销成功，清除本地存储并跳转到登录页
     userStore.logout()
     ElMessage.success('账户已成功注销')

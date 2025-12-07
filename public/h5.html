@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <!-- 关键：适配手机屏幕 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>确认登录</title>
+    <style>
+        /* 简单样式，适配手机 */
+        body { padding: 20px; max-width: 400px; margin: 0 auto; }
+        input { width: 100%; padding: 10px; margin: 10px 0; font-size: 16px; }
+        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h3>确认登录XXX系统</h3>
+    <!-- 仅需输入用户名（生产环境可加密码/验证码） -->
+    <input type="text" id="username" placeholder="请输入你的用户名">
+    <button onclick="confirmLogin()">确认登录</button>
+
+    <script>
+        // 1. 从URL中获取二维码ID（qrId）
+        const qrId = new URLSearchParams(window.location.search).get('qrId');
+        
+        // 2. 确认登录的核心逻辑
+        async function confirmLogin() {
+            const username = document.getElementById('username').value.trim();
+            if (!username) {
+                alert('请输入用户名');
+                return;
+            }
+
+            try {
+                // 3. 调用后端接口，提交qrId和用户名
+                const res = await fetch('https://你的域名/api/qr/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ qrId, username })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    alert('登录确认成功！请返回电脑端查看');
+                } else {
+                    alert(data.msg || '确认失败');
+                }
+            } catch (err) {
+                alert('网络错误，请重试');
+            }
+        }
+    </script>
+</body>
+</html>

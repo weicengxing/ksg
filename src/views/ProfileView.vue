@@ -180,7 +180,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import axios from 'axios'
+import request from '../utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
@@ -243,7 +243,7 @@ const handleAvatarChange = async (event) => {
   formData.append('file', file)
 
   try {
-    const res = await axios.post('http://localhost:8000/auth/upload-avatar', formData, {
+    const res = await request.post('/auth/upload-avatar', formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
@@ -300,7 +300,7 @@ const generateGreeting = () => {
 // 获取用户信息（包含统计信息）
 const fetchUserInfo = async () => {
   try {
-    const res = await axios.get('http://localhost:8000/auth/me')
+    const res = await request.get('/auth/me')
     userInfo.value = {
       username: res.data.username,
       email: res.data.email,
@@ -360,7 +360,7 @@ const handleDeleteAccount = async () => {
     )
 
     // 用户确认注销，调用后端API删除账户
-    await axios.delete('http://localhost:8000/auth/delete-account')
+    await request.delete('/auth/delete-account')
     // 注销成功，清除本地存储并跳转到登录页
     userStore.logout()
     ElMessage.success('账户已成功注销')

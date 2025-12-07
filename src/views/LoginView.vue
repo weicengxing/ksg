@@ -114,7 +114,7 @@
 import { ref, reactive } from 'vue'
 import { User, Lock, Message, Key, Picture } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import axios from 'axios'
+import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 
@@ -183,7 +183,7 @@ const sendCode = async () => {
   if (!regForm.email) return ElMessage.warning('请先填写邮箱')
   
   try {
-    await axios.post('http://localhost:8000/auth/send-code', { email: regForm.email })
+    await request.post('/auth/send-code', { email: regForm.email })
     ElMessage.success('验证码已发送，请查收邮件')
     // 倒计时逻辑
     timer.value = 60
@@ -203,7 +203,7 @@ const handleLogin = async () => {
     if (valid) {
       loading.value = true
       try {
-        const res = await axios.post('http://localhost:8000/auth/login', loginForm)
+        const res = await request.post('/auth/login', loginForm)
 
         // 检查是否需要2FA验证
         if (res.data.requires_2fa) {
@@ -277,7 +277,7 @@ const verify2FA = async () => {
     fd.append('username', twoFAUsername.value)
     fd.append('file', twoFAFile.value)
 
-    const res = await axios.post('http://localhost:8000/auth/verify-2fa', fd)
+    const res = await request.post('/auth/verify-2fa', fd)
 
     // 验证成功，完成登录
     userStore.setLogin(res.data.access_token, res.data.username)
@@ -299,7 +299,7 @@ const handleRegister = async () => {
     if (valid) {
       loading.value = true
       try {
-        await axios.post('http://localhost:8000/auth/register', regForm)
+        await request.post('/auth/register', regForm)
         ElMessage.success('注册成功，请登录')
         activeTab.value = 'login'
         loginForm.username = regForm.username
