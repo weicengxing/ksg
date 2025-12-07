@@ -71,7 +71,22 @@
           
           <header class="content-header">
             <div class="header-text">
-              <h1 class="page-title">账号设置</h1>
+              <div class="title-row">
+                <h1 class="page-title">账号设置</h1>
+                <div class="vip-toggle">
+                  <span class="vip-label" :class="{ 'is-vip': isVip }">
+                    <el-icon v-if="isVip"><Star /></el-icon>
+                    {{ isVip ? 'VIP会员' : '普通用户' }}
+                  </span>
+                  <el-switch
+                    v-model="isVip"
+                    active-color="#FFD700"
+                    inactive-color="#dcdfe6"
+                    @change="handleVipChange"
+                    :loading="vipLoading"
+                  />
+                </div>
+              </div>
               <p class="page-subtitle">管理您的个人资料、公开信息与偏好设置</p>
             </div>
             <div class="header-actions">
@@ -170,7 +185,7 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import {
   Camera, User, Message, SwitchButton, Delete,
-  Setting, Lock, Edit, Link, Suitcase, Loading, Refresh
+  Setting, Lock, Edit, Link, Suitcase, Loading, Refresh, Star
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -181,6 +196,8 @@ const saving = ref(false)
 const avatarInput = ref(null)
 const localAvatarUrl = ref('')
 const userInfo = ref({ username: '', email: '', avatar: '' })
+const isVip = ref(false)
+const vipLoading = ref(false)
 const formData = ref({
   username: '',
   email: '',
@@ -231,6 +248,18 @@ const handleAvatarChange = async (event) => {
   }
 }
 
+// 获取VIP状态
+const fetchVipStatus = async () => {
+  try {
+    const username = userInfo.value.username || userStore.username
+    if (!username) return
+    const res = await request.get(`/deal/getvip?username=${encodeURIComponent(username)}`)
+    isVip.value = res.data.is_vip || false
+  } catch (error) {
+    console.warn('获取VIP状态失败:', error)
+  }
+}
+
 const fetchUserInfo = async () => {
   try {
     const res = await request.get('/auth/me')
@@ -247,6 +276,8 @@ const fetchUserInfo = async () => {
     originalFormData.value = { ...fetchedData }
     profileCompletion.value = res.data.profile_completion || 0
     loading.value = false
+    // 获取VIP状态
+    await fetchVipStatus()
   } catch (error) {
     loading.value = false
     ElMessage.error('获取用户信息失败')
@@ -301,6 +332,22 @@ const handleDeleteAccount = async () => {
 }
 
 onMounted(fetchUserInfo)
+
+// VIP状态切换
+const handleVipChange = async (value) => {
+  vipLoading.value = true
+  try {
+    const username = userInfo.value.username || userStore.username
+    await request.post(`/deal/setvip?username=${encodeURIComponent(username)}&is_vip=${value}`)
+    ElMessage.success(value ? '已开通VIP会员' : '已取消VIP会员')
+  } catch (error) {
+    // 恢复原状态
+    isVip.value = !value
+    ElMessage.error('VIP状态更新失败')
+  } finally {
+    vipLoading.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -397,6 +444,13 @@ onMounted(fetchUserInfo)
 .page-title { font-size: 26px; font-weight: 800; color: #111827; }
 .page-subtitle { color: #6b7280; font-size: 14px; margin-top: 4px; }
 .header-actions { display: flex; gap: 12px; }
+
+/* VIP Toggle 样式 */
+.title-row { display: flex; align-items: center; gap: 16px; }
+.vip-toggle { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: rgba(255, 255, 255, 0.8); border-radius: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.vip-label { font-size: 13px; font-weight: 600; color: #6b7280; display: flex; align-items: center; gap: 4px; transition: all 0.3s; }
+.vip-label.is-vip { color: #d97706; }
+.vip-label .el-icon { font-size: 16px; color: #FFD700; }
 
 .settings-scroll-area { flex: 1; overflow-y: auto; padding: 4px; padding-bottom: 20px; display: flex; flex-direction: column; gap: 24px; }
 .settings-scroll-area::-webkit-scrollbar { width: 6px; }
