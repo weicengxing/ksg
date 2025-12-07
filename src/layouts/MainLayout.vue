@@ -33,19 +33,35 @@
     <main class="main-content">
       <router-view></router-view>
     </main>
+
+    <!-- 全局音频播放器（隐藏，用于后台播放） -->
+    <audio
+      ref="globalAudioPlayer"
+      @timeupdate="updateProgress"
+      @ended="handleSongEnd"
+      @loadedmetadata="handleLoadedMetadata"
+      @play="handlePlay"
+      @pause="handlePause"
+      preload="metadata"
+      style="display: none;"
+    ></audio>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { useMusicStore } from '../stores/music'
 
 const route = useRoute()
+const musicStore = useMusicStore()
+const globalAudioPlayer = ref(null)
 
 // 导航项配置
 const navItems = [
   { name: '控制台', path: '/dashboard', icon: '📊' },
   { name: '文学殿堂', path: '/novel', icon: '📖' },
+  { name: '音乐播放器', path: '/music', icon: '🎵' },
   // 可以在这里添加更多导航项
   // { name: '知识图谱', path: '/knowledge-graph', icon: '🔗' },
   // { name: '问答系统', path: '/qa', icon: '💬' },
@@ -59,6 +75,61 @@ const isActive = (path) => {
 // 判断个人信息相关路由是否激活
 const isProfileActive = computed(() => {
   return route.path.startsWith('/profile')
+})
+
+// 音频播放器事件处理
+const updateProgress = () => {
+  if (globalAudioPlayer.value) {
+    musicStore.setCurrentTime(globalAudioPlayer.value.currentTime)
+    if (globalAudioPlayer.value.duration) {
+      musicStore.setDuration(globalAudioPlayer.value.duration)
+    }
+  }
+}
+
+const handleLoadedMetadata = () => {
+  if (globalAudioPlayer.value && globalAudioPlayer.value.duration) {
+    musicStore.setDuration(globalAudioPlayer.value.duration)
+  }
+}
+
+const handlePlay = () => {
+  musicStore.setIsPlaying(true)
+}
+
+const handlePause = () => {
+  musicStore.setIsPlaying(false)
+}
+
+const handleSongEnd = () => {
+  musicStore.setIsPlaying(false)
+  // 自动播放下一首
+  if (musicStore.songs.length > 0 && musicStore.currentSong) {
+    const currentIndex = musicStore.songs.findIndex(s => s.id === musicStore.currentSong.id)
+    const nextIndex = currentIndex < musicStore.songs.length - 1 ? currentIndex + 1 : 0
+    // 触发下一首播放（需要在 MusicPlayerView 中处理）
+    const event = new CustomEvent('music-next-song', { detail: { song: musicStore.songs[nextIndex] } })
+    window.dispatchEvent(event)
+  }
+}
+
+// 生命周期
+onMounted(() => {
+  // 将音频播放器设置到 store
+  if (globalAudioPlayer.value) {
+    musicStore.setAudioPlayer(globalAudioPlayer.value)
+    // 设置初始音量
+    globalAudioPlayer.value.volume = musicStore.volume / 100
+  }
+})
+
+onUnmounted(() => {
+  // 清理
+  if (globalAudioPlayer.value) {
+    globalAudioPlayer.value.pause()
+    globalAudioPlayer.value.src = ''
+  }
+  musicStore.clearBlobUrl()
 })
 </script>
 
