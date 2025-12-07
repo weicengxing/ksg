@@ -15,21 +15,76 @@
       <el-tabs v-model="activeTab" class="custom-tabs" stretch>
         <!-- 登录 -->
         <el-tab-pane label="登录" name="login">
-          <el-form :model="loginForm" :rules="rules" ref="loginRef" size="large">
-            <el-form-item prop="username">
-              <el-input v-model="loginForm.username" placeholder="用户名">
-                <template #prefix><el-icon><User /></el-icon></template>
-              </el-input>
-            </el-form-item>
-            <el-form-item prop="password">
-              <el-input v-model="loginForm.password" type="password" placeholder="密码" show-password>
-                <template #prefix><el-icon><Lock /></el-icon></template>
-              </el-input>
-            </el-form-item>
-            <el-button type="primary" class="w-100 submit-btn" :loading="loading" @click="handleLogin">
-              登 录
-            </el-button>
-          </el-form>
+          <!-- 密码登录表单 -->
+          <div v-if="!showQRLogin">
+            <el-form :model="loginForm" :rules="rules" ref="loginRef" size="large">
+              <el-form-item prop="username">
+                <el-input v-model="loginForm.username" placeholder="用户名" @blur="checkQRLoginStatus">
+                  <template #prefix><el-icon><User /></el-icon></template>
+                </el-input>
+              </el-form-item>
+              <el-form-item prop="password">
+                <el-input v-model="loginForm.password" type="password" placeholder="密码" show-password>
+                  <template #prefix><el-icon><Lock /></el-icon></template>
+                </el-input>
+              </el-form-item>
+              <div class="forgot-password-link">
+                <router-link to="/forgot-password" class="link-text">忘记密码？</router-link>
+              </div>
+              <el-button type="primary" class="w-100 submit-btn" :loading="loading" @click="handleLogin">
+                登 录
+              </el-button>
+            </el-form>
+
+            <!-- 优化的二维码登录入口 -->
+            <div v-if="qrLoginAvailable" class="qr-login-entry" @click="showQRLogin = true">
+              <div class="qr-entry-content">
+                <div class="icon-circle">
+                  <el-icon><Iphone /></el-icon>
+                </div>
+                <span class="text">手机扫码登录</span>
+              </div>
+              <el-icon class="arrow"><ArrowRight /></el-icon>
+            </div>
+          </div>
+
+          <!-- 二维码登录界面 -->
+          <div v-else class="qr-login-container">
+            <div class="qr-box">
+              <div v-if="qrLoading" class="qr-loading">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>生成中...</span>
+              </div>
+              <div v-else-if="qrExpired" class="qr-expired" @click="generateQRCode">
+                <el-icon><WarningFilled /></el-icon>
+                <span>二维码已过期</span>
+                <p>点击刷新</p>
+              </div>
+              <div v-else-if="qrConfirmed" class="qr-confirmed">
+                <el-icon><CircleCheckFilled /></el-icon>
+                <span>登录成功</span>
+              </div>
+              <div v-else class="qr-code-wrapper">
+                <img :src="qrCodeImage" alt="登录二维码" class="qr-code-img" />
+              </div>
+            </div>
+
+            <div class="qr-status">
+              <span v-if="qrLoading">正在生成二维码...</span>
+              <span v-else-if="qrExpired">二维码已过期，请点击刷新</span>
+              <span v-else-if="qrConfirmed">扫码成功，正在跳转...</span>
+              <span v-else>请使用手机扫描二维码登录</span>
+            </div>
+
+            <div v-if="!qrLoading && !qrExpired && !qrConfirmed" class="qr-countdown">
+              有效期：{{ qrCountdown }}秒
+            </div>
+
+            <div class="back-to-password" @click="backToPassword">
+              <el-icon><Back /></el-icon>
+              <span>返回密码登录</span>
+            </div>
+          </div>
         </el-tab-pane>
 
         <!-- 邮箱注册 -->
@@ -111,8 +166,8 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
-import { User, Lock, Message, Key, Picture } from '@element-plus/icons-vue'
+import { ref, reactive, watch } from 'vue'
+import { User, Lock, Message, Key, Picture, Iphone, Loading, WarningFilled, CircleCheckFilled, Back, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
@@ -137,6 +192,18 @@ const twoFAInput = ref(null)
 const twoFAFile = ref(null)
 const twoFAPreview = ref('')
 const verifying2FA = ref(false)
+
+// 二维码登录相关状态
+const showQRLogin = ref(false)
+const qrLoginAvailable = ref(false)
+const qrLoading = ref(false)
+const qrExpired = ref(false)
+const qrConfirmed = ref(false)
+const qrCodeImage = ref('')
+const qrId = ref('')
+const qrCountdown = ref(300)
+let qrPollingTimer = null
+let qrCountdownTimer = null
 
 // 密码强度校验器
 const validatePassword = (rule, value, callback) => {
@@ -311,6 +378,114 @@ const handleRegister = async () => {
     }
   })
 }
+
+// ==================== 二维码登录相关方法 ====================
+
+// 检查用户是否启用了二维码登录
+const checkQRLoginStatus = async () => {
+  const username = loginForm.username.trim()
+  if (!username) {
+    qrLoginAvailable.value = false
+    return
+  }
+
+  try {
+    const res = await request.get(`/auth/qr/status/${username}`)
+    qrLoginAvailable.value = res.data.qr_login_enabled || false
+  } catch (e) {
+    qrLoginAvailable.value = false
+  }
+}
+
+// 生成二维码
+const generateQRCode = async () => {
+  qrLoading.value = true
+  qrExpired.value = false
+  qrConfirmed.value = false
+  qrCodeImage.value = ''
+
+  clearQRTimers()
+
+  try {
+    const res = await request.post('/auth/qr/generate')
+    qrId.value = res.data.qr_id
+
+    // 使用在线二维码生成服务
+    qrCodeImage.value = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(res.data.qr_url)}`
+
+    qrCountdown.value = res.data.expires_in || 300
+    startCountdown()
+    startPolling()
+  } catch (e) {
+    ElMessage.error('生成二维码失败，请重试')
+    qrExpired.value = true
+  } finally {
+    qrLoading.value = false
+  }
+}
+
+const startCountdown = () => {
+  qrCountdownTimer = setInterval(() => {
+    qrCountdown.value--
+    if (qrCountdown.value <= 0) {
+      qrExpired.value = true
+      clearQRTimers()
+    }
+  }, 1000)
+}
+
+const startPolling = () => {
+  qrPollingTimer = setInterval(async () => {
+    try {
+      const res = await request.get(`/auth/qr/check/${qrId.value}`)
+
+      if (res.data.status === 'confirmed') {
+        qrConfirmed.value = true
+        clearQRTimers()
+
+        userStore.setLogin(res.data.access_token, res.data.username)
+        ElMessage.success('扫码登录成功！')
+
+        setTimeout(() => {
+          router.push('/')
+        }, 1000)
+      } else if (res.data.status === 'expired') {
+        qrExpired.value = true
+        clearQRTimers()
+      }
+    } catch (e) {
+      // 轮询出错，忽略
+    }
+  }, 2000)
+}
+
+const clearQRTimers = () => {
+  if (qrPollingTimer) {
+    clearInterval(qrPollingTimer)
+    qrPollingTimer = null
+  }
+  if (qrCountdownTimer) {
+    clearInterval(qrCountdownTimer)
+    qrCountdownTimer = null
+  }
+}
+
+const backToPassword = () => {
+  showQRLogin.value = false
+  clearQRTimers()
+  qrLoading.value = false
+  qrExpired.value = false
+  qrConfirmed.value = false
+  qrCodeImage.value = ''
+  qrId.value = ''
+}
+
+// 切换到二维码登录时自动生成
+watch(showQRLogin, (val) => {
+  if (val) {
+    generateQRCode()
+  }
+})
 </script>
 
 <style scoped>
@@ -390,6 +565,24 @@ const handleRegister = async () => {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.6);
   line-height: 1.4;
+}
+
+/* 忘记密码链接样式 */
+.forgot-password-link {
+  text-align: right;
+  margin-top: -10px;
+  margin-bottom: 10px;
+}
+
+.forgot-password-link .link-text {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  text-decoration: none;
+  transition: color 0.3s;
+}
+
+.forgot-password-link .link-text:hover {
+  color: #409eff;
 }
 
 /* 覆盖 Element Plus 样式，使其适应深色背景 */
@@ -490,5 +683,219 @@ const handleRegister = async () => {
 :deep(.twofa-dialog .el-dialog__footer) {
   padding: 10px 20px 20px;
   border-top: 1px solid #eee;
+}
+
+/* ================= 二维码登录样式 (优化版) ================= */
+
+/* 优化后的入口容器 */
+.qr-login-entry {
+  margin-top: 40px; /* 增加与上方按钮的间距 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 50px;
+  cursor: pointer;
+  transition: all 0.4s ease;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.qr-login-entry:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px); /* 轻微上浮 */
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+}
+
+.qr-entry-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 图标圆形背景 */
+.icon-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.4s ease;
+}
+
+.qr-login-entry:hover .icon-circle {
+  background: #409eff;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(64, 158, 255, 0.6); /* 发光效果 */
+}
+
+.icon-circle .el-icon {
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.9);
+  transition: color 0.3s;
+}
+
+.qr-login-entry:hover .icon-circle .el-icon {
+  color: #fff;
+}
+
+.qr-login-entry .text {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.8);
+  letter-spacing: 1px;
+}
+
+/* 右侧箭头 */
+.qr-login-entry .arrow {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.4);
+  transition: transform 0.3s, color 0.3s;
+}
+
+.qr-login-entry:hover .arrow {
+  color: #fff;
+  transform: translateX(3px);
+}
+
+
+/* 二维码登录容器 */
+.qr-login-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 0;
+}
+
+/* 二维码框 */
+.qr-box {
+  width: 200px;
+  height: 200px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+/* 二维码加载中 */
+.qr-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: #666;
+}
+
+.qr-loading .el-icon {
+  font-size: 32px;
+  color: #409eff;
+}
+
+.qr-loading span {
+  font-size: 14px;
+}
+
+/* 二维码已过期 */
+.qr-expired {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #999;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.qr-expired:hover {
+  color: #409eff;
+}
+
+.qr-expired .el-icon {
+  font-size: 40px;
+  color: #f56c6c;
+}
+
+.qr-expired span {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.qr-expired p {
+  font-size: 12px;
+  color: #409eff;
+  margin: 0;
+}
+
+/* 二维码已确认 */
+.qr-confirmed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: #67c23a;
+}
+
+.qr-confirmed .el-icon {
+  font-size: 48px;
+}
+
+.qr-confirmed span {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* 二维码图片包装器 */
+.qr-code-wrapper {
+  padding: 10px;
+}
+
+.qr-code-img {
+  width: 180px;
+  height: 180px;
+  display: block;
+}
+
+/* 二维码状态文字 */
+.qr-status {
+  margin-top: 20px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.8);
+  text-align: center;
+}
+
+/* 二维码倒计时 */
+.qr-countdown {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* 返回密码登录按钮 */
+.back-to-password {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 24px;
+  padding: 10px 20px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.3s;
+  border-radius: 8px;
+}
+
+.back-to-password:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.back-to-password .el-icon {
+  font-size: 14px;
 }
 </style>
